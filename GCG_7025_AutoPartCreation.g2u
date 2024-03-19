@@ -1,0 +1,338 @@
+﻿Program.Sub.Preflight.Start
+v.Global.sError.Declare(String)
+v.Global.sARCID.Declare(String, "ARC 7025")
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Author: Arturo Almaguer
+'Date: 1/5/23
+'Customer: Hoffman Instrumentation Supply, quote: 13918
+'This program copies a new part number in a target company when it has been created in a source company.
+'It is triggered off hook 10185 - Inventory Master Post Save hook
+
+'Modification
+'Developer: Angel Tudon
+'Customer: HIS Innovations (formerly Hoffman Instrumentation Supply)
+'Ticket: https://www.gss-service.com/Calls/CallEditInternalOpen/1419452
+'Quote: 14396 - 0
+''Modification adds the ability to select locations in individual company codes to copy newly created parts into if desired
+
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+
+F.Intrinsic.Control.Try
+
+	V.Local.sSQL.Declare(String)
+	v.Local.iUserID.Declare(Long)
+	v.Local.sJobStream.Declare(String)
+	v.Local.sTargetCompanies.Declare(String)
+	V.Local.iCounter.Declare(Long)
+	v.Local.sNewPart.Declare(String)
+	v.Local.sRev.Declare(String)
+	v.Local.sLoc.Declare(String)
+	v.Local.sPL.Declare(String)
+	v.Local.sUM.Declare(String)
+	v.Local.sSource.Declare(String)
+	v.Local.sDescr.Declare(String)
+	v.Local.fPrice.Declare(Float)
+	v.Local.sMessage.Declare(String)
+	v.Local.iTargetCCs.Declare(Long)
+	V.Local.sRet.Declare(String)
+	
+	f.Intrinsic.Control.If(v.Caller.Hook,=,10185, "AND", V.Caller.Switches, =, "N")	
+		
+		'Getting Job Stream
+		f.Global.Security.GetUserId(v.Caller.User, v.Caller.CompanyCode, v.Local.iUserID)
+		f.ODBC.Connection!Con.OpenCommonConnection
+		f.Intrinsic.String.Build("select Top 1 JOB_STREAM_ID from MENU_PROCESS where COMPANY_CODE = '{0}' and USER_ID = '{1}' and PID = '{2}';",v.Caller.CompanyCode,v.Local.iUserID,v.Caller.PID, v.Local.sSQL)
+		f.ODBC.Connection!Con.ExecuteAndReturn(v.Local.sSQL,v.Local.sJobStream)
+		f.ODBC.Connection!Con.Close
+		
+		'"Inventory > File > Inventory Parts > New" = Jobstream 373
+		f.Intrinsic.Control.If(v.Local.sJobStream,=,373)
+			
+			'Setting variables
+			v.Local.sNewPart.Set(V.Passed.000007)
+			v.Local.sRev.Set(V.Passed.000008)
+			F.Intrinsic.String.GSSPartString(v.Local.sNewPart, v.Local.sRev, v.Local.sNewPart)
+			v.Local.sLoc.Set(V.Passed.000009)
+			v.Local.sPL.Set(V.Passed.000011)
+			v.Local.sUM.Set(V.Passed.000014)
+			v.Local.sDescr.Set(V.Passed.000012)
+			v.Local.fPrice.Set(V.Passed.000017)
+	
+			'Getting part's source code
+			f.ODBC.Connection!Con.OpenCompanyConnection
+			f.Intrinsic.String.Build("select RTRIM(CODE_SOURCE) from V_INVENTORY_MST2 where PART = '{0}' and LOCATION = '{1}';", v.Local.sNewPart, v.Local.sLoc, v.Local.sSQL)
+			F.ODBC.Connection!Con.ExecuteAndReturn(v.Local.sSQL, v.Local.sSource)
+			
+			'Getting target companies and part's data from INVENTORY_MST2 and INVENTORY_MST3 source company.
+			f.Intrinsic.String.Build("select * from INVENTORY_MST2 where PART = '{0}' and LOCATION = '{1}';", v.Local.sNewPart, v.Local.sLoc, v.Local.sSQL)
+			f.Data.DataTable.CreateFromSQL("dtInv2", "Con", v.Local.sSQL, True)
+			f.Intrinsic.String.Build("select * from INVENTORY_MST3 where PART = '{0}' and LOCATION = '{1}';", v.Local.sNewPart, v.Local.sLoc, v.Local.sSQL)
+			f.Data.DataTable.CreateFromSQL("dtInv3", "Con", v.Local.sSQL, True)
+			f.ODBC.Connection!Con.Close
+			
+			'AT modfication Nov 2023: Adding functionality to automatically create new parts in multiple locations
+			'------------------------------------------------------------------------------------------------------------------------
+			'Call sub to create part in multiple locations if any are selected in 7025 maintenance for current company code
+			F.Intrinsic.Control.CallSub(MultLocCreation, "Part", V.Local.sNewPart, "Location", V.Local.sLoc, "PL", V.Local.sPL, "UM", V.Local.sUM, "Descr", V.Local.sDescr, "Price", V.Local.fPrice)
+			'------------------------------------------------------------------------------------------------------------------------
+
+			F.ODBC.Connection!con.OpenCompanyConnection
+			'If copy from is not enabled for this company code, end program
+			F.Intrinsic.String.Build("Select COPY_FROM from GCG_7025_MM where code = '{0}'", V.Caller.CompanyCode, V.Local.sSQL)
+			F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sRet)
+			F.Intrinsic.Control.If(V.Local.sRet, !=, "True")
+				F.Intrinsic.Control.End
+			F.Intrinsic.Control.EndIf
+			
+			'Indentify company codes to copy part into
+			F.ODBC.Connection!Con.ExecuteAndReturn("select RTRIM(CODE) CODE from GCG_7025_MM where COPY_TO = '1';", V.Local.sTargetCompanies)
+			f.ODBC.Connection!Con.Close
+			
+			'Continue with process if there is at least one target company code
+			F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, False)
+				
+				f.Intrinsic.String.Split(V.Local.sTargetCompanies, "#$#", V.Local.sTargetCompanies)
+				F.Intrinsic.Math.Add(V.Local.sTargetCompanies.UBound, 1, V.Local.iTargetCCs)
+				F.Intrinsic.String.Build("[{0}] target companies found to copy part into...", V.Local.iTargetCCs, V.Local.sMessage)
+				F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+				
+				'Looping through all target CCs to create part number
+				F.Intrinsic.Control.For(V.Local.iCounter, 0, V.Local.sTargetCompanies.UBound, 1)
+				
+					F.Global.General.OverrideCompany(V.Local.sTargetCompanies(V.Local.iCounter))
+					
+					'Validating if part doesnt exist in target company
+					f.ODBC.Connection!Con.OpenCompanyConnection
+					f.Intrinsic.String.Build("select PART from V_INVENTORY_MSTR where PART = '{0}';", v.Local.sNewPart, v.Local.sSQL)
+					f.ODBC.Connection!Con.ExecuteAndReturn(v.Local.sSQL,v.Local.sSQL)
+					f.ODBC.Connection!Con.Close
+					
+					'Continue with process if part doesn't exist in target company code
+					F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, True)
+					
+						'Calling callwrapper to create part number in target company code and logging it. Callwrapper will be screenless.
+						F.Intrinsic.String.Build("Running Create Part callwrapper for part [{0}] in company [{1}] by [{2}]...", v.Local.sNewPart, V.Local.sTargetCompanies(V.Local.iCounter), V.Caller.User, V.Local.sMessage)
+						F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+						F.Global.Inventory.CreatePart(v.Local.sNewPart, v.Local.sUM.RTrim, v.Local.sDescr.RTrim, "", v.Local.sPL.RTrim, "SourceCode", "", "", v.Local.fPrice, "UPLOADED")
+	
+						'Validating part for successful creation
+						f.ODBC.Connection!Con.OpenCompanyConnection
+						f.Intrinsic.String.Build("select PART from V_INVENTORY_MSTR where PART = '{0}';", v.Local.sNewPart, v.Local.sSQL)
+						F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+						f.ODBC.Connection!Con.Close
+						
+						F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF)
+							
+							'failure
+							F.Intrinsic.String.Build("Part [{0}] validation failed...", V.Local.sNewPart, V.Local.sMessage)
+							F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+						
+						F.Intrinsic.Control.Else
+							
+							'success
+							F.Intrinsic.String.Build("Part [{0}] validation successful...", V.Local.sNewPart, V.Local.sMessage)
+							F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+							
+							'Getting rid of location in both dts in the scenario a location was passed in the source company. This project doesn't consider locations when creating a part number into a target company!!!
+							F.Data.DataTable.SetValue("dtInv2", 0, "LOCATION", "")
+							F.Data.DataTable.SetValue("dtInv3", 0, "LOCATION", "")
+							
+							'Updating part's data in INVENTORY_MST2 and INVENTORY_MST3 to match all part's options and extra fields in target cc, and logging it.
+							F.ODBC.Connection!Con.OpenCompanyConnection
+							F.Data.DataTable.SaveToDB("dtInv2", "Con", "INVENTORY_MST2", "PART", "256")
+							F.Data.DataTable.SaveToDB("dtInv3", "Con", "INVENTORY_MST3", "PART", "256")
+							f.ODBC.Connection!Con.Close
+							F.Intrinsic.String.Build("Inventory 2 and 3 have been updated for Part [{0}]...", V.Local.sNewPart, V.Local.sMessage)
+							F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+							
+							'Displaying success msg
+							F.Intrinsic.String.Build("Part [{0}] has been successfully created in [{1}] company.", V.Local.sNewPart.RTrim, V.Local.sTargetCompanies(V.Local.iCounter), V.Local.sMessage)
+							F.Intrinsic.UI.Msgbox(V.Local.sMessage, V.Global.sARCID)
+						
+						F.Intrinsic.Control.EndIf
+						
+					F.Intrinsic.Control.Else
+					
+						'Part exists in target cc, logging and displaying error msg
+						F.Intrinsic.String.Build("Part [{0}] already exists in [{1}] company.", V.Local.sNewPart.RTrim, V.Local.sTargetCompanies(V.Local.iCounter), V.Local.sMessage)
+						F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+						F.Intrinsic.UI.Msgbox(V.Local.sMessage, V.Global.sARCID)
+				
+					F.Intrinsic.Control.EndIf
+					
+				F.Intrinsic.Control.Next(V.Local.iCounter)
+				
+			F.Intrinsic.Control.Else
+				
+				'No target company codes set up, displaying error msg
+				F.Intrinsic.UI.Msgbox("There are no target company codes... Please set them up under Inventory - Administration - Auto Part Maintenance [7025].", V.Global.sARCID)
+				
+			F.Intrinsic.Control.EndIf
+	
+		f.Intrinsic.Control.EndIf	
+		
+	f.Intrinsic.Control.EndIf
+	
+	'Unload
+	f.Intrinsic.Control.CallSub("Unload")
+
+F.Intrinsic.Control.Catch
+
+	'Displaying error msg, logging error and unload
+	F.Intrinsic.String.Build("Subroutine: {1}{0}Error Occurred {2} with description {3}", V.Ambient.NewLine, V.Ambient.CurrentSubroutine, V.Ambient.ErrorNumber, V.Ambient.ErrorDescription, V.Global.sError)
+	F.Intrinsic.UI.Msgbox(V.Global.sError, V.Global.sARCID)
+	F.Intrinsic.String.Build("Part [{0}] creation process failed due to: {1}", V.Local.sNewPart, V.Global.sError, V.Local.sMessage)
+	F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+	F.Intrinsic.Control.CallSub("Unload")
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.MultLocCreation.Start
+F.Intrinsic.Control.Try
+	
+	V.Local.sSql.Declare(String)
+	V.Local.sLocs.Declare(String)
+	V.Local.sRet.Declare(String)
+	V.Local.iLocsTotal.Declare(Long)
+	V.Local.iCount.Declare(Long)
+	V.Local.sMessage.Declare(String)
+	
+	'Determine if any locations are selected to create part in
+	F.ODBC.Connection!con.OpenCompanyConnection
+	F.Intrinsic.String.Build("Select LOCATION from GCG_7025_MM_LOC where COPY_TO = 1 and LOCATION <> '{0}'", V.Args.Location, V.Local.sSql)
+	F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSql, V.Local.sLocs)
+	
+	'If location(s) to copy to are returned continue with part creation
+	F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, !=, True)
+		
+		F.Intrinsic.String.Split(V.Local.sLocs, "#$#", V.Local.sLocs)
+		F.Intrinsic.Math.Add(V.Local.sLocs.UBound, 1, V.Local.iLocsTotal)
+		F.Intrinsic.String.Build("[{0}] target locations found to copy part into...", V.Local.iLocsTotal, V.Local.sMessage)
+		F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+		
+		'Loop through all target locations to create part in
+		F.Intrinsic.Control.For(V.Local.iCount, 0, V.Local.sLocs.UBound, 1)
+		
+			'Validating part does not exist in target location
+			F.Intrinsic.String.Build("select PART from V_INVENTORY_MSTR where PART = '{0}' and LOCATION = '{1}'", V.Args.Part, V.Local.sLocs(V.Local.iCount), V.Local.sSql)
+			F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSql, V.Local.sRet)
+			
+			'If part does not exist in location, create new
+			F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, True)
+			
+				'Logging part creation start
+				F.Intrinsic.String.Build("Running Create Part callwrapper for part [{0}] in Location [{1}] by [{2}]...", V.Args.Part.RTrim, V.Local.sLocs.RTrim(V.Local.iCount), V.Caller.User, V.Local.sMessage)
+				F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+				
+				'Run callwrapper to create part
+				F.Global.Inventory.CreatePart(V.Args.Part, V.Args.UM.RTrim, V.Args.Descr.RTrim, V.Local.sLocs(V.Local.iCount), V.Args.PL.RTrim, "SourceCode", "", "", V.Args.Price, "UPLOADED")
+				
+				'Validating successful creation
+				F.Intrinsic.String.Build("select PART from V_INVENTORY_MSTR where PART = '{0}' and LOCATION = '{1}'", V.Args.Part, V.Local.sLocs(V.Local.iCount), V.Local.sSql)
+				F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSql, V.Local.sRet)
+				
+				F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, True)
+					
+					'Failure
+					F.Intrinsic.String.Build("Part [{0}] Location [{1}] validation failed...", V.Args.Part.RTrim, V.Local.sLocs.RTrim(V.Local.iCount), V.Local.sMessage)
+					F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+					
+				F.Intrinsic.Control.Else
+				
+					'Success
+					F.Intrinsic.String.Build("Part [{0}] Location [{1}] validation successful...", V.Args.Part.RTrim, V.Local.sLocs.RTrim(V.Local.iCount), V.Local.sMessage)
+					F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+					
+					'Update location on in dts
+					F.Data.DataTable.SetValue("dtInv2", 0, "LOCATION", V.Local.sLocs(V.Local.iCount))
+					F.Data.DataTable.SetValue("dtInv3", 0, "LOCATION", V.Local.sLocs(V.Local.iCount))
+					
+					'Update parts in INVENTORY_MST2 and INVENTORY_MST3
+					F.Data.DataTable.SaveToDB("dtInv2", "Con", "INVENTORY_MST2", "PART*!*LOCATION", "256")
+					F.Data.DataTable.SaveToDB("dtInv3", "Con", "INVENTORY_MST3", "PART*!*LOCATION", "256")
+					F.Intrinsic.String.Build("Inventory 2 and 3 have been updated for Part [{0}] Location [{1}]...", V.Args.Part.RTrim, V.Local.sLocs.RTrim(V.Local.iCount), V.Local.sMessage)
+					F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+					
+				F.Intrinsic.Control.EndIf
+				
+			F.Intrinsic.Control.EndIf
+			
+		F.Intrinsic.Control.Next(V.Local.iCount)
+		
+	F.Intrinsic.Control.EndIf
+	F.ODBC.Connection!con.Close
+
+F.Intrinsic.Control.Catch
+
+	'Displaying error msg, logging error and unload
+	F.Intrinsic.String.Build("Subroutine: {1}{0}Error Occurred {2} with description {3}", V.Ambient.NewLine, V.Ambient.CurrentSubroutine, V.Ambient.ErrorNumber, V.Ambient.ErrorDescription, V.Global.sError)
+	F.Intrinsic.UI.Msgbox(V.Global.sError, V.Global.sARCID)
+	F.Intrinsic.String.Build("Part [{0}] creation process failed due to: {1}", V.Args.Part, V.Global.sError, V.Local.sMessage)
+	F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+	F.Intrinsic.Control.CallSub("Unload")
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.MultLocCreation.End
+
+Program.Sub.Unload.Start				
+'Closing the connection if it is open
+f.Intrinsic.Control.If(v.ODBC.Con.exists,=,"1") 	
+    f.ODBC.Connection!Con.Close
+f.Intrinsic.Control.EndIf
+
+'Ending program
+F.Intrinsic.Control.End
+Program.Sub.Unload.End
+
+Program.Sub.Logging.Start
+'Logging will be set up to trace which parts were replicated successfully or if the part failed and why it failed.
+
+F.Intrinsic.Control.Try
+
+	V.Local.sPath.Declare(String)
+	V.Local.sFile.Declare(String)
+	V.Local.bExists.Declare(Boolean)
+	V.Local.bExists2.Declare(Boolean)
+	V.Local.sMessage.Declare(String)
+	V.Local.sContents.Declare(String)
+	
+	V.Local.sMessage.Set(V.Args.Message)
+	
+	'Checking if log folder exists
+	F.Intrinsic.String.Build("{0}\CUSTOM\7025\LOG", V.Caller.GlobalDir, V.Local.sPath)
+	F.Intrinsic.File.DirExists(V.Local.sPath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists.Not)
+		
+		F.Intrinsic.File.CreateDir(V.Local.sPath)
+	
+	F.Intrinsic.Control.EndIf
+	
+	'Checking if log file exists
+	F.Intrinsic.String.Build("{0}\7025 Log.txt", V.Local.sPath, V.Local.sFile)
+	
+	F.Intrinsic.File.Exists(V.Local.sFile, V.Local.bExists2)
+	F.Intrinsic.Control.If(V.Local.bExists2.Not)
+		
+		F.Intrinsic.String.Build("{0} {1}: Log Start", V.Ambient.Date.FormatYYYY-MM-DD, V.Ambient.Time.Format!HH:NN:SS, V.Local.sContents)
+		F.Intrinsic.File.String2File(V.Local.sFile, V.Local.sContents)
+		
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.String.Build("{0} {1}:{2}{3}", V.Ambient.Date.FormatYYYY-MM-DD, V.Ambient.Time.Format!HH:NN:SS, V.Ambient.Tab, V.Local.sMessage, V.Local.sContents)
+	F.Intrinsic.File.Append2FileNewLine(V.Local.sFile, V.Local.sContents)
+	
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.Logging.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8286.22461$}$1
+${$6$}$Angel$}$20231115155156671$}$KXl0r/FkrMYwb/r4ukQ87VNzvoHa8Zo7wHQB+NMLNKLuM55f206omEARcx/S8C+n3apcbl/V3aI=
+Program.Sub.Comments.End
