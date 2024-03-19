@@ -1,0 +1,422 @@
+﻿Program.Sub.ScreenSU.Start
+Gui.FormCCs..Create(BaseForm)
+Gui.FormCCs..Caption("Auto Part Maintenance [7025]")
+Gui.FormCCs..Size(518,383)
+Gui.FormCCs..MinX(0)
+Gui.FormCCs..MinY(0)
+Gui.FormCCs..Position(0,0)
+Gui.FormCCs..AlwaysOnTop(False)
+Gui.FormCCs..FontName("Tahoma")
+Gui.FormCCs..FontSize(8.25)
+Gui.FormCCs..ControlBox(True)
+Gui.FormCCs..MaxButton(True)
+Gui.FormCCs..MinButton(True)
+Gui.FormCCs..MousePointer(0)
+Gui.FormCCs..Moveable(True)
+Gui.FormCCs..Sizeable(True)
+Gui.FormCCs..ShowInTaskBar(True)
+Gui.FormCCs..TitleBar(True)
+Gui.FormCCs..Event(UnLoad,FormCosts_UnLoad)
+Gui.FormCCs.cmdSave.Create(Button)
+Gui.FormCCs.cmdSave.Enabled(True)
+Gui.FormCCs.cmdSave.Visible(True)
+Gui.FormCCs.cmdSave.Zorder(0)
+Gui.FormCCs.cmdSave.Size(75,23)
+Gui.FormCCs.cmdSave.Position(431,20)
+Gui.FormCCs.cmdSave.Caption("Save")
+Gui.FormCCs.cmdSave.FontName("Tahoma")
+Gui.FormCCs.cmdSave.FontSize(8.25)
+Gui.FormCCs.cmdSave.Event(Click,cmdSave_Click)
+Gui.FormCCs.cmdSave.Anchor(9)
+Gui.FormCCs.tabControl.Create(Tab)
+Gui.FormCCs.tabControl.Enabled(True)
+Gui.FormCCs.tabControl.Visible(True)
+Gui.FormCCs.tabControl.Zorder(0)
+Gui.FormCCs.tabControl.Size(500,294)
+Gui.FormCCs.tabControl.Position(11,52)
+Gui.FormCCs.tabControl.FontName("Tahoma")
+Gui.FormCCs.tabControl.FontSize(8.25)
+Gui.FormCCs.tabControl.Event(Click,tabConntrol_Click)
+Gui.FormCCs.tabControl.Tabs(2)
+Gui.FormCCs.tabControl.SetTab(0)
+Gui.FormCCs.tabControl.Caption("Companies")
+Gui.FormCCs.tabControl.SetTab(1)
+Gui.FormCCs.tabControl.Caption("Locations")
+Gui.FormCCs.gsgcLocations.Create(GsGridControl)
+Gui.FormCCs.gsgcLocations.Enabled(True)
+Gui.FormCCs.gsgcLocations.Visible(True)
+Gui.FormCCs.gsgcLocations.Zorder(0)
+Gui.FormCCs.gsgcLocations.Size(495,263)
+Gui.FormCCs.gsgcLocations.Position(1,-1)
+Gui.FormCCs.gsgcLocations.Parent("tabControl",1)
+Gui.FormCCs.gsgcCCs.Create(GsGridControl)
+Gui.FormCCs.gsgcCCs.Enabled(True)
+Gui.FormCCs.gsgcCCs.Visible(True)
+Gui.FormCCs.gsgcCCs.Zorder(0)
+Gui.FormCCs.gsgcCCs.Size(495,263)
+Gui.FormCCs.gsgcCCs.Position(1,-3)
+Gui.FormCCs.gsgcCCs.Anchor(15)
+Gui.FormCCs.gsgcCCs.Parent("tabControl",0)
+Gui.FormCCs.ddlCCList.Create(DropDownList)
+Gui.FormCCs.ddlCCList.Enabled(True)
+Gui.FormCCs.ddlCCList.Visible(True)
+Gui.FormCCs.ddlCCList.Zorder(0)
+Gui.FormCCs.ddlCCList.Size(100,20)
+Gui.FormCCs.ddlCCList.Position(155,56)
+Gui.FormCCs.ddlCCList.FontName("Tahoma")
+Gui.FormCCs.ddlCCList.FontSize(8.25)
+Gui.FormCCs.ddlCCList.Event(SelectedIndexChanged,ddlCCList_SelectedIndexChanged)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+V.Global.sError.Declare(String)
+V.Global.sARCID.Declare(String, "ARC 7025")
+
+Program.Sub.Preflight.End
+Program.Sub.Main.Start
+'Author: Arturo Almaguer
+'Date: 1/5/23
+'Customer: Hoffman Instrumentation Supply, quote: 13918
+'This program is a maintenance menu for ARC ID 7025
+'It is triggered from a custom menu item under Inventory - Administration - Auto Part Maintenance [7025]
+
+'Modification
+'Developer: Angel Tudon
+'Customer: HIS Innovations (formerly Hoffman Instrumentation Supply)
+'Ticket: https://www.gss-service.com/Calls/CallEditInternalOpen/1419452
+'Quote: 14396 - 0
+'Modification adds the ability to select locations in individual company codes to copy newly created parts into if desired
+
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+
+F.Intrinsic.Control.Try
+	
+	'Hide company dropdown and populate companies in dropdown list
+	GUI.FormCCs.ddlCCList.Visible(Flase)
+	F.ODBC.Connection!con.OpenCommonConnection
+	F.Data.Dictionary.CreateFromSQL("dictCCs", "Con", "Select COCODE as DDINDEX, COCODE from COMPANIES")
+	GUI.FormCCs.ddlCCList.AddItems("Dictionary", "dictCCs")
+	F.Data.Dictionary.Close("dictCCs")
+	F.ODBC.Connection!con.Close
+	'Default form to companies tab and default company selection to first 
+	gui.FormCCs.tabControl.SetTab(0)
+	
+	'Calling subs to check if custom table exists and load dtgv 
+	F.Intrinsic.Control.CallSub(CheckTable)
+	F.Intrinsic.Control.CallSub(LoadDtGv)
+
+	'Showing form
+	GUI.FormCCs..Show
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.CheckTable.Start
+'This subroutine verifies if tables exists in DB, creates it if it doesn't
+F.Intrinsic.Control.Try
+
+	V.Local.bExists.Declare(Boolean)
+	
+	F.ODBC.Connection!Con.OpenCompanyConnection
+	F.ODBC.Connection!Con.TableExists("GCG_7025_MM", V.Local.bExists)
+		F.Intrinsic.Control.If(V.Local.bExists, =, False)
+			F.ODBC.Connection!Con.Execute("CREATE TABLE GCG_7025_MM (CODE CHAR(3), COMPANY_NAME CHAR(50), COPY_FROM BIT, COPY_TO BIT);")
+		F.Intrinsic.Control.EndIf
+	F.ODBC.Connection!Con.Close
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.CheckTable.End
+
+Program.Sub.LoadDtGv.Start
+'This subroutine loads the data
+
+F.Intrinsic.Control.Try
+
+	'To check if datatable already exists and close if it does.
+	F.Intrinsic.Control.If(V.DataTable.dtCCs.Exists)
+		F.Data.DataTable.Close("dtCCs")
+	F.Intrinsic.Control.EndIf
+	
+	'Creating dt with all existing companies
+	F.ODBC.Connection!Con.OpenCommonConnection
+	f.Data.DataTable.CreateFromSQL("dtCCs", "Con", "select RTRIM(COCODE) COCODE, RTRIM(COMPANYNAME) COMPANYNAME from COMPANIES;", True)
+	F.ODBC.Connection!Con.Close
+	
+	'Addding columns to display checkboxes in the gv
+	F.Data.DataTable.AddColumn("dtCCs", "COPY_FROM", "Boolean")
+	F.Data.DataTable.AddColumn("dtCCs", "COPY_TO", "Boolean")
+	
+	'Getting data stored in custom table
+	F.ODBC.Connection!Con.OpenCompanyConnection
+	f.Data.Dictionary.CreateFromSQL("dictTop", "Con", "select CODE, COPY_FROM from GCG_7025_MM;")
+	F.Data.Dictionary.SetDefaultReturn("dictTop", False)
+	F.Data.DataTable.FillFromDictionary("dtCCs", "dictTop", "COCODE", "COPY_FROM")
+	F.Data.Dictionary.Close("dictTop")
+	
+	f.Data.Dictionary.CreateFromSQL("dictTop", "Con", "select CODE, COPY_TO from GCG_7025_MM;")
+	F.Data.Dictionary.SetDefaultReturn("dictTop", False)
+	F.Data.DataTable.FillFromDictionary("dtCCs", "dictTop", "COCODE", "COPY_TO")
+	F.Data.Dictionary.Close("dictTop")
+	F.ODBC.Connection!Con.Close
+	
+	'Setting gv
+	gui.FormCCs.gsgcCCs.AddGridviewFromDatatable("gvCCs","dtCCs")
+	
+	''General Gridview properties
+	gui.FormCCs.gsgcCCs.SetGridviewProperty("gvCCs", V.Enum.GridViewPropertyNames!EnableAppearanceOddRow, True)
+	gui.FormCCs.gsgcCCs.SetGridviewProperty("gvCCs", V.Enum.GridViewPropertyNames!RowAutoHeight, True)
+	gui.FormCCs.gsgcCCs.SetGridviewProperty("gvCCs", V.Enum.GridViewPropertyNames!EnableAppearanceFocusedRow, True) 
+	gui.FormCCs.gsgcCCs.SetGridviewProperty("gvCCs", V.Enum.GridViewPropertyNames!ColumnPanelRowHeight, 45)
+	
+	''Column properties
+	'Formatting captions
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COCODE", V.Enum.ColumnPropertyNames!Caption, "Code")
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COMPANYNAME", V.Enum.ColumnPropertyNames!Caption, "Company Name") 
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_FROM", V.Enum.ColumnPropertyNames!Caption, "Copy From") 
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_TO", V.Enum.ColumnPropertyNames!Caption, "Copy To") 
+	
+	'Formatting headers
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COCODE", V.Enum.ColumnPropertyNames!HeaderFontBold, True)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COMPANYNAME", V.Enum.ColumnPropertyNames!HeaderFontBold, True)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_FROM", V.Enum.ColumnPropertyNames!HeaderFontBold, True)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_TO", V.Enum.ColumnPropertyNames!HeaderFontBold, True)
+	
+	'Formatting columns width
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COCODE", V.Enum.ColumnPropertyNames!MinWidth, 60)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COMPANYNAME", V.Enum.ColumnPropertyNames!MinWidth, 120)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_FROM", V.Enum.ColumnPropertyNames!MaxWidth, 80)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_TO", V.Enum.ColumnPropertyNames!MaxWidth, 80)
+	
+	'Formatting header's allignment
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COCODE", V.Enum.ColumnPropertyNames!HeaderHAlignment, "Center")
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COMPANYNAME", V.Enum.ColumnPropertyNames!HeaderHAlignment, "Center")
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_FROM", V.Enum.ColumnPropertyNames!HeaderHAlignment, "Center")
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_TO", V.Enum.ColumnPropertyNames!HeaderHAlignment, "Center")
+	
+	'Formatting cell's allignment
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COCODE", V.Enum.ColumnPropertyNames!CellHAlignment, "Center")
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COMPANYNAME", V.Enum.ColumnPropertyNames!CellHAlignment, "Center")
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_FROM", V.Enum.ColumnPropertyNames!CellHAlignment, "Center")
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_TO", V.Enum.ColumnPropertyNames!CellHAlignment, "Center")
+	
+	'Formatting columns allow edit
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COCODE", V.Enum.ColumnPropertyNames!AllowEdit, False)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COMPANYNAME", V.Enum.ColumnPropertyNames!AllowEdit, False)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_FROM", V.Enum.ColumnPropertyNames!AllowEdit, True)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_TO", V.Enum.ColumnPropertyNames!AllowEdit, True)
+	
+	'Formatting columns ready only
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COCODE", V.Enum.ColumnPropertyNames!ReadOnly, True)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COMPANYNAME", V.Enum.ColumnPropertyNames!ReadOnly, True)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_FROM", V.Enum.ColumnPropertyNames!ReadOnly, False)
+	gui.FormCCs.gsgcCCs.SetColumnProperty("gvCCs", "COPY_TO", V.Enum.ColumnPropertyNames!ReadOnly, False)
+	
+	'Displaying gv
+	gui.FormCCs.gsgcCCs.MainView("gvCCs") 
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.LoadDtGv.End
+
+Program.Sub.LoadDtGvLocations.Start
+F.Intrinsic.Control.Try
+
+	'Check for table existence and close if true
+	F.Intrinsic.Control.If(V.DataTable.dtLocs.Exists)
+		F.Data.DataTable.Close("dtLocs")
+	F.Intrinsic.Control.EndIf
+	
+	'Override company with selected company and open ODBC connection
+	F.Global.General.OverrideCompany(V.Screen.FormCCs!ddlCCList.Text)
+	F.ODBC.Connection!con.OpenCompanyConnection
+	
+	'Query for all location in currently selected company
+	F.Data.Datatable.CreateFromSQL("dtLocs", "Con", "Select LOCATION, RTRIM(LOCATION_DESC) LOCATION_DESC from V_LOCATIONS", True)
+	
+	'Add copy to boolean column
+	F.Data.DataTable.AddColumn("dtLocs", "COPY_TO", "Boolean")
+	'Populate copy to selections
+	F.Data.Dictionary.CreateFromSQL("dictCopy", "con", "Select LOCATION, COPY_TO from GCG_7025_MM_LOC")
+	F.Data.Dictionary.SetDefaultReturn("dictCopy", 0)
+	F.Data.DataTable.FillFromDictionary("dtLocs", "dictCopy", "LOCATION", "COPY_TO")
+	'Close dictionary
+	F.Data.Dictionary.Close("dictCopy")
+	
+	'Close ODBC connection
+	F.ODBC.Connection!con.Close
+	
+	'Add gridview from datatable
+	GUI.FormCCs.gsgcLocations.AddGridviewFromDatatable("gvLocs", "dtLocs")
+	
+	'Set gridview protperties
+	GUI.FormCCs.gsgcLocations.SetGridviewProperty("gvLocs", V.Enum.GridViewPropertyNames!EnableAppearanceOddRow, True)
+	GUI.FormCCs.gsgcLocations.SetGridviewProperty("gvLocs", V.Enum.GridViewPropertyNames!RowAutoHeight, True)
+	GUI.FormCCs.gsgcLocations.SetGridviewProperty("gvLocs", V.Enum.GridViewPropertyNames!EnableAppearanceFocusedRow, True) 
+	GUI.FormCCs.gsgcLocations.SetGridviewProperty("gvLocs", V.Enum.GridViewPropertyNames!ColumnPanelRowHeight, 45)
+	
+	'Set column captions
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION", "Caption", "Location")
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION_DESC", "Caption", "Description")
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "COPY_TO", "Caption", "Copy To")
+	
+	'Set bold properties
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION", "HeaderFontBold", True)
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION_DESC", "HeaderFontBold", True)
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "COPY_TO", "HeaderFontBold", True)
+	
+	'Set width
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION", "MinWidth", 60)
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION_DESC", "MinWidth", 120)
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "COPY_TO", "MinWidth", 80)
+	
+	'Set header alignments
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION", "HeaderHAlignment", "Center")
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION_DESC", "HeaderHAlignment", "Center")
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "COPY_TO", "HeaderHAlignment", "Center")
+	
+	'Set cell alignments
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION", "CellHAlignment", "Center")
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION_DESC", "CellHAlignment", "Center")
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "COPY_TO", "CellHAlignment", "Center")
+	
+	'Set read only properties
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION", "ReadOnly", True)
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION_DESC", "ReadOnly", True)
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "COPY_TO", "ReadOnly", False)
+
+	'Set allow edit properties
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION", "AllowEdit", False)
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION_DESC", "AllowEdit", False)
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "COPY_TO", "AllowEdit", True)
+	
+	'Set show/hide properties
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION", "AllowShowHide", False)
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "LOCATION_DESC", "AllowShowHide", False)
+	GUI.FormCCs.gsgcLocations.SetColumnProperty("gvLocs", "COPY_TO", "AllowShowHide", False)
+	
+	'Discplay gv
+	GUI.FormCCs.gsgcLocations.MainView("gvLocs")
+	
+	'Override company code back to ambient one
+	F.Global.General.OverrideCompany(V.Caller.CompanyCode)
+	
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.LoadDtGvLocations.End
+
+Program.Sub.FormCosts_UnLoad.Start
+'Making form invisible
+gui.FormCCs..Visible(False)
+
+'Closing the connection if it is open
+f.Intrinsic.Control.If(v.ODBC.Con.exists,=,"1") 	
+    f.ODBC.Connection!Con.Close
+f.Intrinsic.Control.EndIf
+
+'Ending program
+F.Intrinsic.Control.End
+Program.Sub.FormCosts_UnLoad.End
+
+Program.Sub.cmdSave_Click.Start
+'This subroutine saves/updates data in the custom table after the user clicks on Save button
+
+F.Intrinsic.Control.Try
+
+	V.Local.iCounter.Declare(Long)
+	V.Local.sSQL.Declare(String)
+	
+	F.Intrinsic.Control.If(V.Screen.FormCCs!tabControl.Tab, !=, 1)
+	
+		F.ODBC.Connection!Con.OpenCompanyConnection
+		F.Intrinsic.Control.For(V.Local.iCounter, 0, V.DataTable.dtCCs.RowCount--, 1)
+		
+			F.Intrinsic.String.Build("select * from GCG_7025_MM where CODE = '{0}';", V.DataTable.dtCCs(V.Local.iCounter).COCODE!FieldValTrim, V.Local.sSQL)
+			F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+			
+			F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, False)
+				F.Intrinsic.String.Build("update GCG_7025_MM set COPY_FROM = '{0}', COPY_TO = '{1}' where CODE = '{2}';", V.DataTable.dtCCs(V.Local.iCounter).COPY_FROM!FieldValLong, V.DataTable.dtCCs(V.Local.iCounter).COPY_TO!FieldValLong, V.DataTable.dtCCs(V.Local.iCounter).COCODE!FieldValTrim, V.Local.sSQL)
+			F.Intrinsic.Control.Else
+				F.Intrinsic.String.Build("insert into GCG_7025_MM(CODE, COMPANY_NAME, COPY_FROM, COPY_TO) values('{0}','{1}','{2}','{3}');", V.DataTable.dtCCs(V.Local.iCounter).COCODE!FieldValTrim, V.DataTable.dtCCs(V.Local.iCounter).COMPANYNAME!FieldValTrim, V.DataTable.dtCCs(V.Local.iCounter).COPY_FROM!FieldValLong, V.DataTable.dtCCs(V.Local.iCounter).COPY_TO!FieldValLong, V.Local.sSQL)
+			F.Intrinsic.Control.EndIf
+			
+			F.ODBC.Connection!Con.Execute(V.Local.sSQL)
+			
+		F.Intrinsic.Control.Next(V.Local.iCounter)
+		F.ODBC.Connection!Con.Close
+		
+		'Displaying msgbox
+		F.Intrinsic.UI.Msgbox("Values have been saved.", V.Global.sARCID)
+	
+	F.Intrinsic.Control.Else
+		
+		F.ODBC.Connection!con.OpenCompanyConnection
+		F.Data.DataTable.SaveToDB("dtLocs", "con", "GCG_7025_MM_LOC", "LOCATION", "256")
+		F.Intrinsic.UI.Msgbox("Values have been saved.", V.Global.sARCID)
+		F.ODBC.Connection!con.Close
+	
+	F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.Catch
+	
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.cmdSave_Click.End
+
+Program.Sub.CatchError.Start
+'Displaying error msg
+F.Intrinsic.String.Build("Subroutine: {1}{0}Error Occurred {2} with description {3}", V.Ambient.NewLine, V.Ambient.SubroutineCalledFrom, V.Ambient.ErrorNumber, V.Ambient.ErrorDescription, V.Global.sError)
+F.Intrinsic.UI.Msgbox(V.Global.sError, V.Global.sARCID)
+F.Intrinsic.Control.CallSub("FormCosts_UnLoad")
+Program.Sub.CatchError.End
+
+Program.Sub.tabConntrol_Click.Start
+F.Intrinsic.Control.Try
+
+	GUI.FormCCs.gsgcLocations.Visible(False)
+	GUI.FormCCs.gsgcLocations.SuspendLayout()
+
+	F.Intrinsic.Control.If(V.Screen.FormCCs!tabControl.Tab, =, 1)
+		GUI.FormCCs.ddlCCList.Visible(True)
+	F.Intrinsic.Control.Else
+		GUI.FormCCs.ddlCCList.Visible(False)
+	F.Intrinsic.Control.EndIf
+	
+	GUI.FormCCs.gsgcLocations.Visible(True)
+	GUI.FormCCs.gsgcLocations.ResumeLayout()
+	
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.tabConntrol_Click.End
+
+Program.Sub.ddlCCList_SelectedIndexChanged.Start
+F.Intrinsic.Control.Try
+	
+	F.Intrinsic.Control.CallSub(LoadDtGvLocations)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(CatchError)
+F.Intrinsic.Control.EndTry
+Program.Sub.ddlCCList_SelectedIndexChanged.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8286.22461$}$1
+${$6$}$Angel$}$20231115155155758$}$KXl0r/FkrMYwb/r4ukQ87VNzvoHa8Zo7wHQB+NMLNKLuM55f206omCMUb8KxLMN4P5+dGFg0t4o=
+Program.Sub.Comments.End
